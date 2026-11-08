@@ -1,0 +1,81 @@
+# REQUIRED for ReveChatSDK on React Native 0.77+.
+#
+# React Native ships its own SocketRocket inside the prebuilt
+# ReactNativeDependencies.framework and resolves the `SocketRocket` pod to a
+# facade that builds no standalone framework. ReveChatSDK.framework links
+# @rpath/SocketRocket.framework/SocketRocket, which then never gets embedded,
+# and the app dies at launch with:
+#
+#   dyld: Library not loaded: @rpath/SocketRocket.framework/SocketRocket
+#   Referenced from: .../YourApp.app/Frameworks/ReveChatSDK.framework/ReveChatSDK
+#
+# Building React Native's dependencies from source produces a real
+# SocketRocket.framework, which CocoaPods then embeds. The cost is a much
+# slower first build.
+ENV['RCT_USE_RN_DEP'] = '0'
+ENV['RCT_USE_PREBUILT_RNCORE'] = '0'
+
+# Resolve react_native_pods.rb with node to allow for hoisting
+require Pod::Executable.execute_command('node', ['-p',
+  'require.resolve(
+    "react-native/scripts/react_native_pods.rb",
+    {paths: [process.argv[1]]},
+  )', __dir__]).strip
+
+platform :ios, min_ios_version_supported
+prepare_react_native_project!
+
+# ReveChatSDK ships as a prebuilt dynamic .framework and links AFNetworking and
+# GoogleWebRTC dynamically, so the pods must be built as frameworks rather than
+# static libraries. Without this the app fails to link with
+# "library not found for -lAFNetworking".
+use_frameworks! :linkage => :dynamic
+
+target 'ReveChatDemo' do
+  config = use_native_modules!
+
+  use_react_native!(
+    :path => config[:reactNativePath],
+    # An absolute path to your application root.
+    :app_path => "#{Pod::Config.instance.installation_root}/.."
+  )
+
+  pod 'ReveChatSDK', '3.0.2.10'
+
+  post_install do |installer|
+    react_native_post_install(
+      installer,
+      config[:reactNativePath],
+      :mac_catalyst_enabled => false,
+      # :ccache_enabled => true
+    )
+
+    # Xcode 27 rejects anything below 15.0 outright 
+    # ("the range of supported deployment target versions is 15.0 to 27.2.x"),
+    # where Xcode 26 only warned. 15.0 is the lowest Xcode 27 accepts; 
+    # the app itself stays at React Native's 15.1.
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |config|
+        current = config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'].to_f
+        if current > 0 && current < 15.0
+          config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
+        end
+      end
+    end
+
+    af_dir = File.join(installer.sandbox.root, 'AFNetworking', 'AFNetworking')
+    if File.directory?(af_dir)
+      import_line = '#import <netinet6/in6.h>'
+      Dir.glob(File.join(af_dir, '**', '*.{h,m}')).each do |path|
+        lines = File.readlines(path)
+        filtered = lines.reject { |l| l.strip == import_line }
+        next if filtered.size == lines.size
+
+        mode = File.stat(path).mode & 0o7777
+        File.chmod(0o644, path)
+        File.write(path, filtered.join)
+        File.chmod(mode, path)
+      end
+    end
+  end
+end
