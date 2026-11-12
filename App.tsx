@@ -23,7 +23,7 @@ import {SafeAreaProvider, SafeAreaView} from 'react-native-safe-area-context';
 const {ReveChatSDKModule} = NativeModules;
 
 // Replace with your own account id from the REVE Chat dashboard.
-const ACCOUNT_ID = '2552651';
+const ACCOUNT_ID = '2088935';
 
 const VISITOR = {
   name: 'ahad',
