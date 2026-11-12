@@ -1,20 +1,3 @@
-# REQUIRED for ReveChatSDK on React Native 0.77+.
-#
-# React Native ships its own SocketRocket inside the prebuilt
-# ReactNativeDependencies.framework and resolves the `SocketRocket` pod to a
-# facade that builds no standalone framework. ReveChatSDK.framework links
-# @rpath/SocketRocket.framework/SocketRocket, which then never gets embedded,
-# and the app dies at launch with:
-#
-#   dyld: Library not loaded: @rpath/SocketRocket.framework/SocketRocket
-#   Referenced from: .../YourApp.app/Frameworks/ReveChatSDK.framework/ReveChatSDK
-#
-# Building React Native's dependencies from source produces a real
-# SocketRocket.framework, which CocoaPods then embeds. The cost is a much
-# slower first build.
-ENV['RCT_USE_RN_DEP'] = '0'
-ENV['RCT_USE_PREBUILT_RNCORE'] = '0'
-
 # Resolve react_native_pods.rb with node to allow for hoisting
 require Pod::Executable.execute_command('node', ['-p',
   'require.resolve(
@@ -25,11 +8,11 @@ require Pod::Executable.execute_command('node', ['-p',
 platform :ios, min_ios_version_supported
 prepare_react_native_project!
 
-# ReveChatSDK ships as a prebuilt dynamic .framework and links AFNetworking and
-# GoogleWebRTC dynamically, so the pods must be built as frameworks rather than
-# static libraries. Without this the app fails to link with
-# "library not found for -lAFNetworking".
-use_frameworks! :linkage => :dynamic
+# ReveChatSDK 3.1.0+ is a prebuilt XCFramework that depends only on WebRTC-lib
+# (also a prebuilt XCFramework). CocoaPods embeds both as-is under either
+# linkage, so the app stays on static linkage and React Native's prebuilt
+# dependencies, with no ReveChat-specific hooks or ENV flags.
+use_frameworks! :linkage => :static
 
 target 'ReveChatDemo' do
   config = use_native_modules!
@@ -40,7 +23,8 @@ target 'ReveChatDemo' do
     :app_path => "#{Pod::Config.instance.installation_root}/.."
   )
 
-  pod 'ReveChatSDK', '3.0.2.10'
+  # STC UAT pre-release: CocoaPods only resolves it when named exactly.
+  pod 'ReveChatSDK', '3.1.0-stc-uat'
 
   post_install do |installer|
     react_native_post_install(
@@ -60,21 +44,6 @@ target 'ReveChatDemo' do
         if current > 0 && current < 15.0
           config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
         end
-      end
-    end
-
-    af_dir = File.join(installer.sandbox.root, 'AFNetworking', 'AFNetworking')
-    if File.directory?(af_dir)
-      import_line = '#import <netinet6/in6.h>'
-      Dir.glob(File.join(af_dir, '**', '*.{h,m}')).each do |path|
-        lines = File.readlines(path)
-        filtered = lines.reject { |l| l.strip == import_line }
-        next if filtered.size == lines.size
-
-        mode = File.stat(path).mode & 0o7777
-        File.chmod(0o644, path)
-        File.write(path, filtered.join)
-        File.chmod(mode, path)
       end
     end
   end
